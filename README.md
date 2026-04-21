@@ -307,14 +307,13 @@ Shows detailed information about:
 
 1. **Mock Implementation**: This is a POC - HIP APIs are mocked (no real GPU operations)
 2. **Limited APIs**: Only basic HIP APIs implemented (malloc, free, memcpy, kernel launch)
-3. **Single Tool**: Only supports one tool at a time (can be extended)
-4. **No Buffering**: Traces written immediately (no buffering optimization)
+3. **No Buffering**: Traces written immediately (no buffering optimization)
+4. **Single SDK Instance**: Multiple tools share the same SDK (by design)
 
 ## Future Enhancements
 
 - [ ] Real HIP runtime integration
 - [ ] HSA API tracing support
-- [ ] Multiple tool registration
 - [ ] Buffered trace writing
 - [ ] Binary trace format option
 - [ ] Performance counters integration

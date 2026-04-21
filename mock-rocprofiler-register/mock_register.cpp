@@ -398,40 +398,57 @@ discover_and_initialize_tools()
         return;
     }
 
+    // Initialize each tool by calling rocprofiler_configure on each one
     VERBOSE_LOG("----------------------------------------");
-    VERBOSE_LOG("Searching for rocprofiler_configure symbol");
+    VERBOSE_LOG("Initializing tools (calling rocprofiler_configure on each)");
     VERBOSE_LOG("----------------------------------------");
 
-    // Search for rocprofiler_configure in all loaded modules
-    // WINDOWS NOTE: No RTLD_DEFAULT, must enumerate modules manually
-    void* configure_symbol = find_symbol_in_any_module("rocprofiler_configure");
+    int tools_initialized = 0;
 
-    if(!configure_symbol)
+    for(size_t i = 0; i < loaded_tools.size(); ++i)
     {
-        VERBOSE_LOG("WARNING: rocprofiler_configure symbol not found");
-        VERBOSE_LOG("Tools loaded but cannot initialize - missing configuration function");
+        HMODULE tool_handle = loaded_tools[i];
+
+        // Get rocprofiler_configure from THIS specific tool
+        void* configure_symbol = GetProcAddress(tool_handle, "rocprofiler_configure");
+
+        if(!configure_symbol)
+        {
+            VERBOSE_LOG("Tool [%zu]: No rocprofiler_configure symbol found - skipping", i);
+            continue;
+        }
+
+        VERBOSE_LOG("Tool [%zu]: Found rocprofiler_configure - calling...", i);
+
+        // Call this tool's configure function
+        auto configure_func = reinterpret_cast<rocprofiler_configure_func_t>(configure_symbol);
+
+        uint64_t client_id = 0;
+        int      result    = configure_func(
+            1,                // version
+            "6.4.0",          // runtime version (mock)
+            0,                // priority
+            &client_id);      // output: client ID
+
+        VERBOSE_LOG("Tool [%zu]: rocprofiler_configure returned: %d (client_id=%llu)",
+                    i,
+                    result,
+                    (unsigned long long) client_id);
+
+        tools_initialized++;
+    }
+
+    VERBOSE_LOG("Initialized %d tool(s)", tools_initialized);
+
+    if(tools_initialized == 0)
+    {
+        VERBOSE_LOG("WARNING: No tools were successfully initialized");
         return;
     }
 
-    // Call rocprofiler_configure
-    auto configure_func = reinterpret_cast<rocprofiler_configure_func_t>(configure_symbol);
-
-    VERBOSE_LOG("----------------------------------------");
-    VERBOSE_LOG("Calling rocprofiler_configure()");
-    VERBOSE_LOG("----------------------------------------");
-
-    uint64_t client_id = 0;
-    int      result    = configure_func(
-        1,                // version
-        "6.4.0",          // runtime version (mock)
-        0,                // priority
-        &client_id);      // output: client ID
-
-    VERBOSE_LOG("rocprofiler_configure returned: %d (client_id=%llu)",
-                result,
-                (unsigned long long) client_id);
-
     // Now search for rocprofiler_set_api_table
+    // NOTE: This symbol is provided by the SDK (not individual tools)
+    // so we search globally across all loaded modules
     VERBOSE_LOG("----------------------------------------");
     VERBOSE_LOG("Searching for rocprofiler_set_api_table symbol");
     VERBOSE_LOG("----------------------------------------");
@@ -461,11 +478,11 @@ discover_and_initialize_tools()
                     reg.version,
                     reg.api_tables.size());
 
-        result = set_table_func(reg.name.c_str(),
-                                reg.version,
-                                reg.id.handle,
-                                const_cast<void**>(reg.api_tables.data()),
-                                reg.api_tables.size());
+        int result = set_table_func(reg.name.c_str(),
+                                     reg.version,
+                                     reg.id.handle,
+                                     const_cast<void**>(reg.api_tables.data()),
+                                     reg.api_tables.size());
 
         VERBOSE_LOG("  -> rocprofiler_set_api_table returned: %d", result);
     }
