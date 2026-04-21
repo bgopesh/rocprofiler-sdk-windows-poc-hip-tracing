@@ -22,6 +22,7 @@
 //=============================================================================
 
 #include "mock_register.h"
+#include "pe_parser.h"
 
 #include <windows.h>
 #include <psapi.h>  // For EnumProcessModules
@@ -216,6 +217,64 @@ find_symbol_in_any_module(const char* symbol_name)
     return nullptr;
 }
 
+/// @brief Enhanced symbol search with PE validation and address checking
+///
+/// Uses PE parser to validate symbol addresses and provide detailed information
+///
+/// @param symbol_name Name of the symbol to find
+/// @return Function pointer if found and validated, nullptr otherwise
+void*
+find_symbol_with_validation(const char* symbol_name)
+{
+    VERBOSE_LOG("Searching for symbol with validation: %s", symbol_name);
+
+    auto modules = enumerate_loaded_modules();
+    for(size_t i = 0; i < modules.size(); ++i)
+    {
+        void* symbol = reinterpret_cast<void*>(GetProcAddress(modules[i], symbol_name));
+        if(symbol)
+        {
+            // Found symbol - validate it using PE parser
+            char module_path[MAX_PATH] = {0};
+            GetModuleFileNameA(modules[i], module_path, sizeof(module_path));
+            const char* filename = strrchr(module_path, '\\');
+            filename             = filename ? (filename + 1) : module_path;
+
+            // Validate address is in executable memory
+            if(!pe_parser::is_address_executable(symbol))
+            {
+                VERBOSE_LOG("  -> WARNING: Symbol '%s' in %s is not executable (address: %p)",
+                            symbol_name,
+                            filename,
+                            symbol);
+                continue;  // Skip invalid symbol
+            }
+
+            // Get memory protection info
+            DWORD protection = pe_parser::get_memory_protection(symbol);
+            VERBOSE_LOG("  -> Found '%s' in %s at %p (protection: 0x%lx)",
+                        symbol_name,
+                        filename,
+                        symbol,
+                        (unsigned long)protection);
+
+            // Verify symbol is in the correct module
+            void* symbol_module = pe_parser::find_module_for_address(symbol);
+            if(symbol_module != modules[i])
+            {
+                VERBOSE_LOG("  -> WARNING: Symbol module mismatch (expected %p, got %p)",
+                            modules[i],
+                            symbol_module);
+            }
+
+            return symbol;
+        }
+    }
+
+    VERBOSE_LOG("  -> Symbol '%s' not found or validated", symbol_name);
+    return nullptr;
+}
+
 }  // namespace
 
 //=============================================================================
@@ -312,6 +371,18 @@ discover_and_initialize_tools()
     VERBOSE_LOG("========================================");
     VERBOSE_LOG("Tool Discovery Phase");
     VERBOSE_LOG("========================================");
+
+    // Optional: Print memory map for debugging (enabled via env var)
+    char debug_memmap[32] = {0};
+    GetEnvironmentVariableA("ROCPROFILER_DEBUG_MEMMAP", debug_memmap, sizeof(debug_memmap));
+    if(debug_memmap[0] == '1')
+    {
+        VERBOSE_LOG("----------------------------------------");
+        VERBOSE_LOG("Memory Map (ROCPROFILER_DEBUG_MEMMAP=1)");
+        VERBOSE_LOG("----------------------------------------");
+        pe_parser::print_memory_map();
+        VERBOSE_LOG("----------------------------------------");
+    }
 
     // STEP 1: Load the SDK library first
     // The SDK provides rocprofiler_configure and rocprofiler_set_api_table

@@ -21,6 +21,8 @@ cmake_minimum_required(VERSION 3.16)
 add_library(mock-rocprofiler-register SHARED
     mock_register.cpp
     mock_register.h
+    pe_parser.cpp
+    pe_parser.h
 )
 
 # Set output name to match ROCm convention
